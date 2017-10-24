@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 #define FIFO_RECEIVE "FIFO_R"
 #define FIFO_SEND "FIFO_S"
@@ -13,9 +14,10 @@
 
 char instruction[DMAX];
 char tokens[DMAX][DMAX];
-char path[DMAX] = "/home/timi";
-char absPath[DMAX] = "/home/timi";
+char path[DMAX];
+char absPath[DMAX];
 int tokensDim;
+char string[DMAX];
 
 void Get_StrTok(char *instr){
 
@@ -40,6 +42,7 @@ void ChangeDirectory(){
     strcat(path, "/");
     strcat(path, tokens[1]);
     chdir(path);
+    printf("%s\n", path);
 }
 
 
@@ -52,9 +55,6 @@ void ReceiveData(){
     if ((num = read(fd, instruction, DMAX)) == -1){
         perror("Eroare la citirea din FIFO fiu!");
     }
-    else {
-        //printf("S-au citit din FIFO %d bytes: \"%s\"\n", num, s);
-    }
     close(fd);
 
 }
@@ -62,12 +62,16 @@ void ReceiveData(){
 void SendData(int argc, char *argv[]){
 
     int fd1;
-    //fd1 = open(FIFO_SEND, O_WRONLY);
-    fd1 = open(FIFO_SEND, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    fd1 = open(FIFO_SEND, O_WRONLY);
     dup2(fd1, 1);
     dup2(fd1, 2);
-    //close(fd1);
+    if (strcmp(argv[0], "myfind") == 0){
+        execl("find.bin", "find.bin", argv[1], NULL);
+        return;
+    }
+    
     execvp(argv[0], argv);
+    close(fd1);
 }
 
 void Exec(){
@@ -81,7 +85,6 @@ void Exec(){
     for (int i = 0; i < tokensDim; i++)
         argv[i] = tokens[i];
     argv[argc] = NULL;
-
 
     if (-1 == (pid = fork())){
         perror("Eroare la fork");
@@ -103,16 +106,20 @@ void Exec(){
 
 int main() 
 { 
+
     ReceiveData();
     Get_StrTok(instruction);
 
-    /*if (strcmp(tokens[0], "cd") == 0){
-            ChangeDirectory();
-        }
-        else{*/
-            Exec(tokensDim, tokens); 
-        //}
+    if (strcmp(tokens[0], "quit") == 0){
+        kill(getppid(), SIGINT);
+        exit(1);
+    }
+    if (strcmp(tokens[0], "cd") == 0){
+        ChangeDirectory();
+        exit(1);
+    }
     
+    Exec(tokensDim, tokens); 
     exit(1);
     return 0;
 }

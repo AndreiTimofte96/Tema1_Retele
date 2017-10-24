@@ -12,11 +12,11 @@
 #define FIFO_SEND "FIFO_R"
 #define FIFO_RECEIVE "FIFO_S"
 
-
-
 char x;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
-char instruction[DMAX], path[DMAX] = "/home/timi", absPath[DMAX] = "/home/timi";
+char instruction[DMAX], path[DMAX] = "/home/timi";
+
+
 enum Channel{Pipes, Fifos, Sockets} channel;
 
 /////////////////Autentificare plus setare canal
@@ -46,6 +46,7 @@ void ReadCredentials(){
 	
 	fscanf(df, "%s %s", realUsername, realPassword);
 }
+
 int RequestCredentials(){
 
 	printf("%s", "Username: ");
@@ -76,15 +77,15 @@ void ReplaceString(char *str){
 }
 void Print_NameLine(){
 
-	char *p;
+	char absPath[DMAX];
 	getcwd(absPath, sizeof(absPath));
+	//strcpy(absPath, path);
 	ReplaceString(absPath);
 	printf("%s%s%s %s %s ", username, "@", username, absPath, "$");
 }
 void GetInstruction(){
 	fgets(instruction, DMAX, stdin);
 }////////////////////////////////
-
 
 ///////////////////Canale comunicare
 void Fifo(){
@@ -99,18 +100,20 @@ void Fifo(){
 
   	if (pid_fiu == 0){ // fiu
 		
-		execl("recDataFifo.bin", "recDataFifo.bin", NULL);
+		execl("DataFifo.bin", "DataFifo.bin", NULL);
   	}
 	else{ //parinte
 
 		int stat, cod_term;
 
+		//send
 		fd = open(FIFO_SEND, O_WRONLY);
 		if (write(fd, instruction, strlen(instruction)) == -1){
 		        perror("Problema la scriere in FIFO tata!");
 		}
 		close(fd);
 
+		//receive
 	    char received[DMAX]; int length;
 	    mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
 	    fd1 = open(FIFO_RECEIVE, O_RDONLY);
@@ -118,11 +121,10 @@ void Fifo(){
         	perror("Eroare la citirea din FIFO!");
     	}
     	received[length] = '\0';
-    	close(fd1);
  		printf("%s", received);
+    	close(fd1);
 
  		stat = wait(&cod_term);
-
 	    if ( WIFEXITED(cod_term) ){
 	        printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
 	    }
@@ -152,18 +154,17 @@ void Execute(){
 
 int main(int argc, char *argv[]){
 
+	
 	if (SetChannel(argc, argv) == 0){
 		return 0;
 	}
 	ReadCredentials();
-	while (!RequestCredentials());
-
+	//while (!RequestCredentials());
+	
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
 		Execute();
 	}
-
-
 	return 0;
 }
