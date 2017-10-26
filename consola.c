@@ -7,17 +7,19 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <sys/socket.h>
 #define LEN 30
 #define DMAX 1001
 #define FIFO_SEND "FIFO_S"
 #define FIFO_RECEIVE "FIFO_R"
 
 char x;
-int isLogin = 0, logged = 0;
+int isLogin = 0, logged = 0, tokensDim;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
-char instruction[DMAX], path[DMAX] = "/home/timi";
-char tokens[DMAX][DMAX], path[DMAX], absPath[DMAX], string[DMAX];
-int tokensDim;
+char instruction[DMAX], received[DMAX];
+char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
+int sockp_T[2], sockp_F[2];
+
 
 enum Channel{Pipes, Fifos, Sockets} channel;
 
@@ -74,7 +76,6 @@ void Get_StrTok(char *instr){
         p = strtok (NULL, " \n");
     }
 }
-
 void ChangeDirectory(){
 
     if (tokensDim == 1){
@@ -88,7 +89,6 @@ void ChangeDirectory(){
     chdir(path);
     printf("%s\n", path);
 }
-
 void ReplaceString(char *str){
 
 	char auxStr[DMAX];
@@ -111,10 +111,23 @@ void GetInstruction(){
 	fgets(instruction, DMAX, stdin);
 }
 
-void Fifo(){
+void Execute(){
 
     int fd_W, fd_R;
     pid_t pid_fiu, pid_nepot;
+    char *argv[DMAX];
+    int argc;
+    int status;
+
+
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_T) < 0 ) {		
+        perror("Err... socketpair"); 
+        exit(1); 
+     }
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_F) < 0 ) {		
+        perror("Err... socketpair"); 
+        exit(1); 
+     }
 
     if(-1 == (pid_fiu=fork())){
     	perror("Eroare la fork");
@@ -124,8 +137,21 @@ void Fifo(){
   	if (pid_fiu == 0){ // FIU
 
   		//primesc date de la tata
-    	mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
-    	fd_R = open(FIFO_SEND, O_RDONLY);
+  		switch(channel){
+  			case Pipes:
+  				break;
+  			case Fifos:
+    			mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
+    			fd_R = open(FIFO_SEND, O_RDONLY);
+    			break;
+    		case Sockets:
+    			close(sockp_T[0]);
+    			fd_R = sockp_T[1];
+    			break;
+    		default:
+    			break;
+		}
+
     	if (read(fd_R, instruction, DMAX) == -1){
         	perror("Eroare la citirea din FIFO fiu!");
     	}
@@ -141,9 +167,7 @@ void Fifo(){
 	        exit(1);
 	    }*/
 	  	
-    	char *argv[DMAX];
-    	int argc;
-
+    	
 	    argc = tokensDim;   
 	    for (int i = 0; i < tokensDim; i++)
 	        argv[i] = tokens[i];
@@ -153,10 +177,22 @@ void Fifo(){
 	        perror("Eroare la fork");
 	        return;
 	    }
-
 	    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
-	
-    		fd_W = open(FIFO_RECEIVE, O_WRONLY);
+			
+	    	//scriu date catre tata
+	    	switch(channel){
+	  			case Pipes:
+	  				break;
+	  			case Fifos:	
+	  				fd_W = open(FIFO_RECEIVE, O_WRONLY);
+	    			break;
+	    		case Sockets:
+	    			close(sockp_F[1]);
+	    			fd_W = sockp_F[0];
+	    			break;
+	    		default:
+	    			break;
+			}
     		dup2(fd_W, 1);
     		dup2(fd_W, 2);
     		if (strcmp(argv[0], "myfind") == 0){
@@ -179,7 +215,7 @@ void Fifo(){
     		close(fd_W);
 	    }   
 	    else{ //FIU
-	      	int status;
+	    
 	        if (wait (&status) < 0){
 	            perror ("wait()");
 	    	}
@@ -189,18 +225,44 @@ void Fifo(){
 	else{ //PARINTE
 
 		int stat, cod_term;
+		 int length;
 
-		//send
-		fd_W = open(FIFO_SEND, O_WRONLY);
-		if (write(fd_W, instruction, strlen(instruction)) == -1){
+		//trimite data catre fiu
+		switch(channel){
+	  		case Pipes:
+  				break;
+  			case Fifos:	
+  				fd_W = open(FIFO_SEND, O_WRONLY);
+    			break;
+    		case Sockets:
+    			close(sockp_T[1]);
+    			fd_W = sockp_T[0];
+    			break;
+    		default:
+    			break;
+		}
+
+		if (write(fd_W, instruction, sizeof(instruction)) == -1){
 		        perror("Problema la scriere in FIFO tata!");
 		}
 		close(fd_W);
 
 		//receive
-	    char received[DMAX]; int length;
-	    mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
-	    fd_R= open(FIFO_RECEIVE, O_RDONLY);
+	    //citeste date de la fiu
+	    switch(channel){
+	  		case Pipes:
+  				break;
+  			case Fifos:	
+  				mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
+	    		fd_R= open(FIFO_RECEIVE, O_RDONLY);
+    			break;
+    		case Sockets:
+    			close(sockp_F[0]);
+    			fd_R = sockp_F[1];
+    			break;
+    		default:
+    			break;
+		}
 
 	    if (isLogin == 1){
 
@@ -210,7 +272,6 @@ void Fifo(){
 	    	
 	 		if (logged){
 	 			printf("%s\n", "Welcome!");
-
 	 		}
 	 		else{
 	 			printf("%s\n", "Wrong Credentials!");
@@ -230,7 +291,7 @@ void Fifo(){
 
  		stat = wait(&cod_term);
 	    if ( WIFEXITED(cod_term) ){
-	        printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
+	     //   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
 	    }
 	    else{
 	      perror("Eroare\n");
@@ -238,56 +299,40 @@ void Fifo(){
 	}
 }
 
-void Execute(){
+void LoginProtocol(){
 
-	switch(channel){
-		case Pipes:
-			//Pipe();
-			break;
-		case Fifos:
-			Fifo();
-			break;
-		case Sockets:
-			//Socket();
-			break;
-		default:
-			break;
+	if (logged == 1){
+		Execute();
 	}
+	else{ 
+		if (strstr(instruction, "login") != NULL){
+			isLogin = 1;
+			RequestCredentials(); 
+			Execute();
+			isLogin = 0;
+		}
+		else{
+			if (strstr(instruction, "quit") != NULL){
+				Execute();
+			}	
+			else{
+				printf("%s\n", "Access Denied");
+			}
+	 	}
+	 }
 }
-
 
 int main(int argc, char *argv[]){
 
 	if (SetChannel(argc, argv) == 0){
 		return 0;
 	}
-	//ReadCredentials();
-	//while (!RequestCredentials());
-	
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		
-		if (logged == 1){
-			Execute();
-		}
-		else{ 
-			if (strstr(instruction, "login") != NULL){
-				isLogin = 1;
-				RequestCredentials(); 
-				Execute();
+		//LoginProtocol();		
+		Execute();
 
-				isLogin = 0;
-			}
-			else{
-				if (strstr(instruction, "quit") != NULL){
-					Execute();
-				}	
-				else{
-					printf("%s\n", "Access Denied");
-				}
-		 	}
-		 }
 	}
 	return 0;
 }
