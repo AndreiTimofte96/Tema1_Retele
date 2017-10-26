@@ -111,192 +111,201 @@ void GetInstruction(){
 	fgets(instruction, DMAX, stdin);
 }
 
+void Son(){
+
+	int fd_W, fd_R;
+    pid_t pid_nepot;
+    char *argv[DMAX];
+    int argc, status;
+
+	//primesc date de la tata
+	switch(channel){
+		case Pipes:
+			break;
+		case Fifos:
+			mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
+			fd_R = open(FIFO_SEND, O_RDONLY);
+			break;
+		case Sockets:
+			close(sockp_T[0]);
+			fd_R = sockp_T[1];
+			break;
+		default:
+			break;
+	}
+
+	if (read(fd_R, instruction, DMAX) == -1){
+    	perror("Eroare la citirea din FIFO fiu!");
+	}
+	close(fd_R);
+
+	Get_StrTok(instruction);
+	if (strcmp(tokens[0], "quit") == 0){
+        kill(getppid(), SIGINT);
+        exit(1);
+  	}
+    /*if (strcmp(tokens[0], "cd") == 0){
+        ChangeDirectory();
+        exit(1);
+    }*/
+  	
+    argc = tokensDim;   
+    for (int i = 0; i < tokensDim; i++)
+        argv[i] = tokens[i];
+    argv[argc] = NULL;
+
+    if (-1 == (pid_nepot = fork())){
+        perror("Eroare la fork");
+        return;
+    }
+    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
+		
+    	//scriu date catre tata
+    	switch(channel){
+  			case Pipes:
+  				break;
+  			case Fifos:	
+  				fd_W = open(FIFO_RECEIVE, O_WRONLY);
+    			break;
+    		case Sockets:
+    			close(sockp_F[1]);
+    			fd_W = sockp_F[0];
+    			break;
+    		default:
+    			break;
+		}
+		dup2(fd_W, 1); 
+		dup2(fd_W, 2);
+		if (strcmp(argv[0], "myfind") == 0){
+    		execl("find.bin", "find.bin", argv[1], NULL);
+    		return;
+		}
+		if (strcmp(tokens[0], "login") == 0){
+			ReadCredentials();
+			logged = 0;
+			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
+				logged = 1;
+			}
+			if (write(fd_W, &logged, sizeof(logged)) == -1){
+	        	perror("Problema la scriere in FIFO tata!");
+			}
+			close(fd_W);
+  		}
+
+		execvp(argv[0], argv);
+		close(fd_W);
+    }   
+    else{ //FIU
+    
+        if (wait (&status) < 0){
+            perror ("wait()");
+    	}
+    }
+    exit(1);
+}
+
+void Parent(){
+
+	int fd_W, fd_R;
+	int stat, cod_term, length;
+
+	//trimite data catre fiu
+	switch(channel){
+  		case Pipes:
+				break;
+			case Fifos:	
+				fd_W = open(FIFO_SEND, O_WRONLY);
+			break;
+		case Sockets:
+			close(sockp_T[1]);
+			fd_W = sockp_T[0];
+			break;
+		default:
+			break;
+	}
+
+	if (write(fd_W, instruction, sizeof(instruction)) == -1){
+	        perror("Problema la scriere in FIFO tata!");
+	}
+	close(fd_W);
+
+	//receive
+    //citeste date de la fiu
+    switch(channel){
+  		case Pipes:
+				break;
+			case Fifos:	
+				mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
+    		fd_R= open(FIFO_RECEIVE, O_RDONLY);
+			break;
+		case Sockets:
+			close(sockp_F[0]);
+			fd_R = sockp_F[1];
+			break;
+		default:
+			break;
+	}
+
+    if (isLogin == 1){
+
+    	if ((length = read(fd_R, &logged, sizeof(int))) == -1){
+        	perror("Eroare la citirea din FIFO!");
+    	}
+    	
+ 		if (logged){
+ 			printf("%s\n", "Welcome!");
+ 		}
+ 		else{
+ 			printf("%s\n", "Wrong Credentials!");
+ 			strcpy(username, "");
+ 		}
+    }
+    else{
+    
+    	if ((length = read(fd_R, received, DMAX)) == -1){
+        	perror("Eroare la citirea din FIFO!");
+    	}
+    	received[length] = '\0';
+ 		printf("%s", received);
+ 	}
+
+	close(fd_R);
+
+	stat = wait(&cod_term);
+    if ( WIFEXITED(cod_term) ){
+     //   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
+    }
+    else{
+      perror("Eroare\n");
+    }
+}
+
+
 void Execute(){
 
     int fd_W, fd_R;
-    pid_t pid_fiu, pid_nepot;
-    char *argv[DMAX];
-    int argc;
-    int status;
-
+    pid_t pid_fiu;
 
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_T) < 0 ) {		
         perror("Err... socketpair"); 
         exit(1); 
-     }
+    }
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_F) < 0 ) {		
         perror("Err... socketpair"); 
         exit(1); 
-     }
+    }
 
     if(-1 == (pid_fiu=fork())){
     	perror("Eroare la fork");
     	return;
   	}
 
-  	if (pid_fiu == 0){ // FIU
-
-  		//primesc date de la tata
-  		switch(channel){
-  			case Pipes:
-  				break;
-  			case Fifos:
-    			mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
-    			fd_R = open(FIFO_SEND, O_RDONLY);
-    			break;
-    		case Sockets:
-    			close(sockp_T[0]);
-    			fd_R = sockp_T[1];
-    			break;
-    		default:
-    			break;
-		}
-
-    	if (read(fd_R, instruction, DMAX) == -1){
-        	perror("Eroare la citirea din FIFO fiu!");
-    	}
-    	close(fd_R);
-
-    	Get_StrTok(instruction);
-    	if (strcmp(tokens[0], "quit") == 0){
-	        kill(getppid(), SIGINT);
-	        exit(1);
-	  	}
-	    /*if (strcmp(tokens[0], "cd") == 0){
-	        ChangeDirectory();
-	        exit(1);
-	    }*/
-	  	
-    	
-	    argc = tokensDim;   
-	    for (int i = 0; i < tokensDim; i++)
-	        argv[i] = tokens[i];
-	    argv[argc] = NULL;
-
-	    if (-1 == (pid_nepot = fork())){
-	        perror("Eroare la fork");
-	        return;
-	    }
-	    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
-			
-	    	//scriu date catre tata
-	    	switch(channel){
-	  			case Pipes:
-	  				break;
-	  			case Fifos:	
-	  				fd_W = open(FIFO_RECEIVE, O_WRONLY);
-	    			break;
-	    		case Sockets:
-	    			close(sockp_F[1]);
-	    			fd_W = sockp_F[0];
-	    			break;
-	    		default:
-	    			break;
-			}
-    		dup2(fd_W, 1);
-    		dup2(fd_W, 2);
-    		if (strcmp(argv[0], "myfind") == 0){
-        		execl("find.bin", "find.bin", argv[1], NULL);
-        		return;
-    		}
-    		if (strcmp(tokens[0], "login") == 0){
-    			ReadCredentials();
-    			logged = 0;
-    			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
-    				logged = 1;
-    			}
-				if (write(fd_W, &logged, sizeof(logged)) == -1){
-		        	perror("Problema la scriere in FIFO tata!");
-				}
-				close(fd_W);
-	  		}
-
-    		execvp(argv[0], argv);
-    		close(fd_W);
-	    }   
-	    else{ //FIU
-	    
-	        if (wait (&status) < 0){
-	            perror ("wait()");
-	    	}
-	    }
-	    exit(1);
+  	if (pid_fiu == 0){
+  		Son();
   	}
-	else{ //PARINTE
-
-		int stat, cod_term;
-		 int length;
-
-		//trimite data catre fiu
-		switch(channel){
-	  		case Pipes:
-  				break;
-  			case Fifos:	
-  				fd_W = open(FIFO_SEND, O_WRONLY);
-    			break;
-    		case Sockets:
-    			close(sockp_T[1]);
-    			fd_W = sockp_T[0];
-    			break;
-    		default:
-    			break;
-		}
-
-		if (write(fd_W, instruction, sizeof(instruction)) == -1){
-		        perror("Problema la scriere in FIFO tata!");
-		}
-		close(fd_W);
-
-		//receive
-	    //citeste date de la fiu
-	    switch(channel){
-	  		case Pipes:
-  				break;
-  			case Fifos:	
-  				mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
-	    		fd_R= open(FIFO_RECEIVE, O_RDONLY);
-    			break;
-    		case Sockets:
-    			close(sockp_F[0]);
-    			fd_R = sockp_F[1];
-    			break;
-    		default:
-    			break;
-		}
-
-	    if (isLogin == 1){
-
-	    	if ((length = read(fd_R, &logged, sizeof(int))) == -1){
-	        	perror("Eroare la citirea din FIFO!");
-	    	}
-	    	
-	 		if (logged){
-	 			printf("%s\n", "Welcome!");
-	 		}
-	 		else{
-	 			printf("%s\n", "Wrong Credentials!");
-	 			strcpy(username, "");
-	 		}
-	    }
-	    else{
-	    
-	    	if ((length = read(fd_R, received, DMAX)) == -1){
-	        	perror("Eroare la citirea din FIFO!");
-	    	}
-	    	received[length] = '\0';
-	 		printf("%s", received);
-	 	}
-
-    	close(fd_R);
-
- 		stat = wait(&cod_term);
-	    if ( WIFEXITED(cod_term) ){
-	     //   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
-	    }
-	    else{
-	      perror("Eroare\n");
-	    }
-	}
+	else{ 
+		Parent();
+	}		
 }
 
 void LoginProtocol(){
@@ -330,9 +339,18 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		//LoginProtocol();		
-		Execute();
+		LoginProtocol();		
+		//Execute();
 
 	}
 	return 0;
 }
+/*
+de facut in continuare: 
+1) stergerea fisierelor fifo
+2) prefixare comenzi dimensiunea lor
+3) cd
+4) adaugare pipeuri
+5) my_stat
+6) my_stat de adaugat la find.
+*/
