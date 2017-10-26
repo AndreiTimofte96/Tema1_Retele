@@ -13,6 +13,7 @@
 #define FIFO_RECEIVE "FIFO_R"
 
 char x;
+int isLogin = 0, logged = 0;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], path[DMAX] = "/home/timi";
 char tokens[DMAX][DMAX], path[DMAX], absPath[DMAX], string[DMAX];
@@ -56,10 +57,10 @@ int RequestCredentials(){
 	scanf("%s", password);
 	scanf("%c", &x);
 
-	if (strcmp(username, realUsername) == 0 && strcmp(password, realPassword) == 0){
-		return 1;
-	}
-	printf("%s\n", "Wrong credentials!");
+	strcat(instruction, username);
+	strcat(instruction, " ");
+	strcat(instruction, password);
+
 	return 0;
 }
 void Get_StrTok(char *instr){
@@ -120,7 +121,7 @@ void Fifo(){
     	return;
   	}
 
-  	if (pid_fiu == 0){ // fiu 
+  	if (pid_fiu == 0){ // FIU
 
   		//primesc date de la tata
     	mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
@@ -134,11 +135,12 @@ void Fifo(){
     	if (strcmp(tokens[0], "quit") == 0){
 	        kill(getppid(), SIGINT);
 	        exit(1);
-	    }
+	  	}
 	    /*if (strcmp(tokens[0], "cd") == 0){
 	        ChangeDirectory();
 	        exit(1);
 	    }*/
+	  	
     	char *argv[DMAX];
     	int argc;
 
@@ -152,7 +154,7 @@ void Fifo(){
 	        return;
 	    }
 
-	    if (pid_nepot == 0){ //nepot -> redirectez datele catre canal
+	    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
 	
     		fd_W = open(FIFO_RECEIVE, O_WRONLY);
     		dup2(fd_W, 1);
@@ -161,10 +163,22 @@ void Fifo(){
         		execl("find.bin", "find.bin", argv[1], NULL);
         		return;
     		}
+    		if (strcmp(tokens[0], "login") == 0){
+    			ReadCredentials();
+    			logged = 0;
+    			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
+    				logged = 1;
+    			}
+				if (write(fd_W, &logged, sizeof(logged)) == -1){
+		        	perror("Problema la scriere in FIFO tata!");
+				}
+				close(fd_W);
+	  		}
+
     		execvp(argv[0], argv);
     		close(fd_W);
 	    }   
-	    else{ //fiu  	
+	    else{ //FIU
 	      	int status;
 	        if (wait (&status) < 0){
 	            perror ("wait()");
@@ -172,7 +186,7 @@ void Fifo(){
 	    }
 	    exit(1);
   	}
-	else{ //parinte
+	else{ //PARINTE
 
 		int stat, cod_term;
 
@@ -187,11 +201,31 @@ void Fifo(){
 	    char received[DMAX]; int length;
 	    mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
 	    fd_R= open(FIFO_RECEIVE, O_RDONLY);
-    	if ((length = read(fd_R, received, DMAX)) == -1){
-        	perror("Eroare la citirea din FIFO!");
-    	}
-    	received[length] = '\0';
- 		printf("%s", received);
+
+	    if (isLogin == 1){
+
+	    	if ((length = read(fd_R, &logged, sizeof(int))) == -1){
+	        	perror("Eroare la citirea din FIFO!");
+	    	}
+	    	
+	 		if (logged){
+	 			printf("%s\n", "Welcome!");
+
+	 		}
+	 		else{
+	 			printf("%s\n", "Wrong Credentials!");
+	 			strcpy(username, "");
+	 		}
+	    }
+	    else{
+	    
+	    	if ((length = read(fd_R, received, DMAX)) == -1){
+	        	perror("Eroare la citirea din FIFO!");
+	    	}
+	    	received[length] = '\0';
+	 		printf("%s", received);
+	 	}
+
     	close(fd_R);
 
  		stat = wait(&cod_term);
@@ -220,7 +254,7 @@ void Execute(){
 			break;
 	}
 }
-/////////////////////////
+
 
 int main(int argc, char *argv[]){
 
@@ -233,7 +267,27 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		Execute();
+		
+		if (logged == 1){
+			Execute();
+		}
+		else{ 
+			if (strstr(instruction, "login") != NULL){
+				isLogin = 1;
+				RequestCredentials(); 
+				Execute();
+
+				isLogin = 0;
+			}
+			else{
+				if (strstr(instruction, "quit") != NULL){
+					Execute();
+				}	
+				else{
+					printf("%s\n", "Access Denied");
+				}
+		 	}
+		 }
 	}
 	return 0;
 }
