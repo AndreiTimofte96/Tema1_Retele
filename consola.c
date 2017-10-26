@@ -9,17 +9,18 @@
 #include <unistd.h>
 #define LEN 30
 #define DMAX 1001
-#define FIFO_SEND "FIFO_R"
-#define FIFO_RECEIVE "FIFO_S"
+#define FIFO_SEND "FIFO_S"
+#define FIFO_RECEIVE "FIFO_R"
 
 char x;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], path[DMAX] = "/home/timi";
-
+char tokens[DMAX][DMAX], path[DMAX], absPath[DMAX], string[DMAX];
+int tokensDim;
 
 enum Channel{Pipes, Fifos, Sockets} channel;
 
-/////////////////Autentificare plus setare canal
+
 int SetChannel(int argc, char *argv[]){
 
 	if (argc != 2){
@@ -46,7 +47,6 @@ void ReadCredentials(){
 	
 	fscanf(df, "%s %s", realUsername, realPassword);
 }
-
 int RequestCredentials(){
 
 	printf("%s", "Username: ");
@@ -61,10 +61,33 @@ int RequestCredentials(){
 	}
 	printf("%s\n", "Wrong credentials!");
 	return 0;
-}//////////////////////////
+}
+void Get_StrTok(char *instr){
 
+    char * p;
+    tokensDim = 0;
+    p = strtok (instr, " \n");
+    while (p != NULL){  
+        
+        strcpy(tokens[tokensDim++], p);
+        p = strtok (NULL, " \n");
+    }
+}
 
-//////////////////////Afisare linie + Citire comenzi
+void ChangeDirectory(){
+
+    if (tokensDim == 1){
+
+        chdir("/home/timi");
+        return;
+    }
+
+    strcat(path, "/");
+    strcat(path, tokens[1]);
+    chdir(path);
+    printf("%s\n", path);
+}
+
 void ReplaceString(char *str){
 
 	char auxStr[DMAX];
@@ -85,44 +108,91 @@ void Print_NameLine(){
 }
 void GetInstruction(){
 	fgets(instruction, DMAX, stdin);
-}////////////////////////////////
+}
 
-///////////////////Canale comunicare
 void Fifo(){
 
-    int fd, fd1;
-    pid_t pid_fiu;
+    int fd_W, fd_R;
+    pid_t pid_fiu, pid_nepot;
 
     if(-1 == (pid_fiu=fork())){
     	perror("Eroare la fork");
     	return;
   	}
 
-  	if (pid_fiu == 0){ // fiu
-		
-		execl("DataFifo.bin", "DataFifo.bin", NULL);
+  	if (pid_fiu == 0){ // fiu 
+
+  		//primesc date de la tata
+    	mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
+    	fd_R = open(FIFO_SEND, O_RDONLY);
+    	if (read(fd_R, instruction, DMAX) == -1){
+        	perror("Eroare la citirea din FIFO fiu!");
+    	}
+    	close(fd_R);
+
+    	Get_StrTok(instruction);
+    	if (strcmp(tokens[0], "quit") == 0){
+	        kill(getppid(), SIGINT);
+	        exit(1);
+	    }
+	    /*if (strcmp(tokens[0], "cd") == 0){
+	        ChangeDirectory();
+	        exit(1);
+	    }*/
+    	char *argv[DMAX];
+    	int argc;
+
+	    argc = tokensDim;   
+	    for (int i = 0; i < tokensDim; i++)
+	        argv[i] = tokens[i];
+	    argv[argc] = NULL;
+
+	    if (-1 == (pid_nepot = fork())){
+	        perror("Eroare la fork");
+	        return;
+	    }
+
+	    if (pid_nepot == 0){ //nepot -> redirectez datele catre canal
+	
+    		fd_W = open(FIFO_RECEIVE, O_WRONLY);
+    		dup2(fd_W, 1);
+    		dup2(fd_W, 2);
+    		if (strcmp(argv[0], "myfind") == 0){
+        		execl("find.bin", "find.bin", argv[1], NULL);
+        		return;
+    		}
+    		execvp(argv[0], argv);
+    		close(fd_W);
+	    }   
+	    else{ //fiu  	
+	      	int status;
+	        if (wait (&status) < 0){
+	            perror ("wait()");
+	    	}
+	    }
+	    exit(1);
   	}
 	else{ //parinte
 
 		int stat, cod_term;
 
 		//send
-		fd = open(FIFO_SEND, O_WRONLY);
-		if (write(fd, instruction, strlen(instruction)) == -1){
+		fd_W = open(FIFO_SEND, O_WRONLY);
+		if (write(fd_W, instruction, strlen(instruction)) == -1){
 		        perror("Problema la scriere in FIFO tata!");
 		}
-		close(fd);
+		close(fd_W);
 
 		//receive
 	    char received[DMAX]; int length;
 	    mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
-	    fd1 = open(FIFO_RECEIVE, O_RDONLY);
-    	if ((length = read(fd1, received, DMAX)) == -1){
+	    fd_R= open(FIFO_RECEIVE, O_RDONLY);
+    	if ((length = read(fd_R, received, DMAX)) == -1){
         	perror("Eroare la citirea din FIFO!");
     	}
     	received[length] = '\0';
  		printf("%s", received);
-    	close(fd1);
+    	close(fd_R);
 
  		stat = wait(&cod_term);
 	    if ( WIFEXITED(cod_term) ){
@@ -154,11 +224,10 @@ void Execute(){
 
 int main(int argc, char *argv[]){
 
-	
 	if (SetChannel(argc, argv) == 0){
 		return 0;
 	}
-	ReadCredentials();
+	//ReadCredentials();
 	//while (!RequestCredentials());
 	
 	while(1){
