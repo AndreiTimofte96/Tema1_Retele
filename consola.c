@@ -10,16 +10,15 @@
 #include <sys/socket.h>
 #define LEN 30
 #define DMAX 1001
-#define FIFO_SEND "FIFO_S"
-#define FIFO_RECEIVE "FIFO_R"
+#define FIFO_SEND "/home/timi/Documents/Retele/Tema1_Week5/FIFO_S"
+#define FIFO_RECEIVE "/home/timi/Documents/Retele/Tema1_Week5/FIFO_R"
 
 char x;
-int isLogin = 0, logged = 0, tokensDim;
+int isLogin = 0, logged = 0, tokensDim, isCd = 0, firstCd = 0;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], received[DMAX];
 char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
-int sockp_T[2], sockp_F[2];
-
+int sockp_T[2], sockp_F[2], sockPath_T[2], sockPath_F[2];
 
 enum Channel{Pipes, Fifos, Sockets} channel;
 
@@ -46,11 +45,11 @@ int SetChannel(int argc, char *argv[]){
 void ReadCredentials(){
 
 	FILE *df;
-	df = fopen("credentials.txt", "r");
+	df = fopen("/home/timi/Documents/Retele/Tema1_Week5/credentials.txt", "r");
 	
 	fscanf(df, "%s %s", realUsername, realPassword);
 }
-int RequestCredentials(){
+void RequestCredentials(){
 
 	printf("%s", "Username: ");
 	scanf("%s", username);
@@ -63,7 +62,6 @@ int RequestCredentials(){
 	strcat(instruction, " ");
 	strcat(instruction, password);
 
-	return 0;
 }
 void Get_StrTok(char *instr){
 
@@ -78,17 +76,17 @@ void Get_StrTok(char *instr){
 }
 void ChangeDirectory(){
 
+
     if (tokensDim == 1){
-
-        chdir("/home/timi");
-        return;
+    	strcpy(path, "/home/timi");
     }
-
-    strcat(path, "/");
-    strcat(path, tokens[1]);
+    else{
+    	strcat(path, "/");
+    	strcat(path, tokens[1]);
+	}
     chdir(path);
-    printf("%s\n", path);
 }
+
 void ReplaceString(char *str){
 
 	char auxStr[DMAX];
@@ -101,9 +99,7 @@ void ReplaceString(char *str){
 }
 void Print_NameLine(){
 
-	char absPath[DMAX];
-	getcwd(absPath, sizeof(absPath));
-	//strcpy(absPath, path);
+	strcpy(absPath, path);
 	ReplaceString(absPath);
 	printf("%s%s%s %s %s ", username, "@", username, absPath, "$");
 }
@@ -113,12 +109,15 @@ void GetInstruction(){
 
 void Son(){
 
-	int fd_W, fd_R;
+	int fd_W, fd_R, path_R, path_W;
     pid_t pid_nepot;
     char *argv[DMAX];
     int argc, status;
+    char sonPath[DMAX];
 
 	//primesc date de la tata
+	close(sockPath_T[0]);
+	path_R = sockPath_T[1];
 	switch(channel){
 		case Pipes:
 			break;
@@ -137,6 +136,14 @@ void Son(){
 	if (read(fd_R, instruction, DMAX) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
+
+	if (read(path_R, sonPath, DMAX) == -1){
+    	perror("Eroare la citirea din FIFO fiu!");
+	}
+
+	strcpy(path, sonPath);
+	chdir(path);
+	close(path_R);
 	close(fd_R);
 
 	Get_StrTok(instruction);
@@ -144,11 +151,7 @@ void Son(){
         kill(getppid(), SIGINT);
         exit(1);
   	}
-    /*if (strcmp(tokens[0], "cd") == 0){
-        ChangeDirectory();
-        exit(1);
-    }*/
-  	
+
     argc = tokensDim;   
     for (int i = 0; i < tokensDim; i++)
         argv[i] = tokens[i];
@@ -161,6 +164,9 @@ void Son(){
     if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
 		
     	//scriu date catre tata
+    	close(sockPath_F[1]);
+    	path_W = sockPath_F[0];
+	
     	switch(channel){
   			case Pipes:
   				break;
@@ -176,10 +182,30 @@ void Son(){
 		}
 		dup2(fd_W, 1); 
 		dup2(fd_W, 2);
+		
+		
+   		if (strcmp(tokens[0], "cd") == 0){
+        	ChangeDirectory();
+        	getcwd(path, sizeof(path));
+        	if (write(path_W, path, sizeof(path)) == -1){
+	        	perror("Problema la scriere in FIFO tata! 1");
+			}
+			close(path_W);
+    	}
+    	else{
+    		getcwd(path, sizeof(path));
+    		if (write(path_W, path, sizeof(path)) == -1){
+	        	perror("Problema la scriere in FIFO tata! 2");
+			}
+			close(path_W);
+		}
+
+
 		if (strcmp(argv[0], "myfind") == 0){
-    		execl("find.bin", "find.bin", argv[1], NULL);
+    		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
     		return;
 		}
+
 		if (strcmp(tokens[0], "login") == 0){
 			ReadCredentials();
 			logged = 0;
@@ -187,7 +213,7 @@ void Son(){
 				logged = 1;
 			}
 			if (write(fd_W, &logged, sizeof(logged)) == -1){
-	        	perror("Problema la scriere in FIFO tata!");
+	        	perror("Problema la scriere in FIFO tata! 3");
 			}
 			close(fd_W);
   		}
@@ -206,10 +232,14 @@ void Son(){
 
 void Parent(){
 
-	int fd_W, fd_R;
+	int fd_W, fd_R, path_W, path_R;
 	int stat, cod_term, length;
 
 	//trimite data catre fiu
+
+	close(sockPath_T[1]);
+	path_W = sockPath_T[0];
+
 	switch(channel){
   		case Pipes:
 				break;
@@ -225,12 +255,21 @@ void Parent(){
 	}
 
 	if (write(fd_W, instruction, sizeof(instruction)) == -1){
-	        perror("Problema la scriere in FIFO tata!");
+	        perror("Problema la scriere in FIFO tata! 4 ");
 	}
+
+	if (write(path_W, path, sizeof(path)) == -1){
+	        perror("Problema la scriere in FIFO tata! 5");
+	}
+	
+	close(path_W);
 	close(fd_W);
 
 	//receive
     //citeste date de la fiu
+	close(sockPath_F[0]);
+	path_R = sockPath_F[1];
+
     switch(channel){
   		case Pipes:
 				break;
@@ -245,6 +284,13 @@ void Parent(){
 		default:
 			break;
 	}
+
+	//primesc pathul
+	if (read(path_R, &path, DMAX) == -1){
+       	perror("Eroare la citirea din FIFO!");
+   	}
+   	//printf("%s\n", path);
+   	close(path_R);
 
     if (isLogin == 1){
 
@@ -273,7 +319,7 @@ void Parent(){
 
 	stat = wait(&cod_term);
     if ( WIFEXITED(cod_term) ){
-     //   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
+    // 	   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
     }
     else{
       perror("Eroare\n");
@@ -291,6 +337,15 @@ void Execute(){
         exit(1); 
     }
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_F) < 0 ) {		
+        perror("Err... socketpair"); 
+        exit(1); 
+    }
+
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath_T) < 0 ) {		
+        perror("Err... socketpair"); 
+        exit(1); 
+    }
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath_F) < 0 ) {		
         perror("Err... socketpair"); 
         exit(1); 
     }
@@ -336,6 +391,7 @@ int main(int argc, char *argv[]){
 	if (SetChannel(argc, argv) == 0){
 		return 0;
 	}
+
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
@@ -347,10 +403,10 @@ int main(int argc, char *argv[]){
 }
 /*
 de facut in continuare: 
-1) stergerea fisierelor fifo
-2) prefixare comenzi dimensiunea lor
-3) cd
-4) adaugare pipeuri
-5) my_stat
-6) my_stat de adaugat la find.
+1) stergerea fisierelor fifo - optional - marti
+2) prefixare comenzi dimensiunea lor - marti
+3) cd - duminica
+4) adaugare pipeuri - marti
+5) my_stat - duminica
+6) my_stat de adaugat la find. - duminica
 */
