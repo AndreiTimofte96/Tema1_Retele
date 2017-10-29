@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #define LEN 30
-#define DMAX 1001
+#define DMAX 10001
 #define FIFO_SEND "/home/timi/Documents/Retele/Tema1_Week5/FIFO_S"
 #define FIFO_RECEIVE "/home/timi/Documents/Retele/Tema1_Week5/FIFO_R"
 
@@ -203,6 +203,12 @@ void Son(){
 
 		if (strcmp(argv[0], "myfind") == 0){
     		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
+    		execl("/home/timi/Documents/Retele/Tema1_Week5/stat.bin", "stat.bin", argv[1], NULL);
+    		return;
+		}
+
+		if (strcmp(argv[0], "mystat") == 0){
+    		execl("/home/timi/Documents/Retele/Tema1_Week5/stat.bin", "stat.bin", argv[1], NULL);
     		return;
 		}
 
@@ -319,7 +325,7 @@ void Parent(){
 
 	stat = wait(&cod_term);
     if ( WIFEXITED(cod_term) ){
-    // 	   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
+    //	   printf("Rezultat: %d.\n", WEXITSTATUS(cod_term));
     }
     else{
       perror("Eroare\n");
@@ -405,8 +411,8 @@ int main(int argc, char *argv[]){
 de facut in continuare: 
 1) stergerea fisierelor fifo - optional - marti
 2) prefixare comenzi dimensiunea lor - marti
-3) cd - duminica
+3) cd - duminica - DONE
 4) adaugare pipeuri - marti
-5) my_stat - duminica
-6) my_stat de adaugat la find. - duminica
+5) my_stat - duminica - DONE 
+6) my_stat de adaugat la find. - duminica - DONE
 */
