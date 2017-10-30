@@ -113,11 +113,13 @@ void Son(){
     pid_t pid_nepot;
     char *argv[DMAX];
     int argc, status;
-    char sonPath[DMAX];
+    char sonPath[DMAX], pipeRead[DMAX];
+    int pfd[2]; 	
 
 	//primesc date de la tata
 	close(sockPath_T[0]);
 	path_R = sockPath_T[1];
+
 	switch(channel){
 		case Pipes:
 			break;
@@ -143,9 +145,9 @@ void Son(){
 
 	strcpy(path, sonPath);
 	chdir(path);
-	close(path_R);
 	close(fd_R);
-
+	close(path_R);
+	
 	Get_StrTok(instruction);
 	if (strcmp(tokens[0], "quit") == 0){
         kill(getppid(), SIGINT);
@@ -157,17 +159,8 @@ void Son(){
         argv[i] = tokens[i];
     argv[argc] = NULL;
 
-    if (-1 == (pid_nepot = fork())){
-        perror("Eroare la fork");
-        return;
-    }
-    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
-		
-    	//scriu date catre tata
-    	close(sockPath_F[1]);
-    	path_W = sockPath_F[0];
-	
-    	switch(channel){
+    //Trimit date catre tata
+    switch(channel){
   			case Pipes:
   				break;
   			case Fifos:	
@@ -179,31 +172,46 @@ void Son(){
     			break;
     		default:
     			break;
-		}
-		dup2(fd_W, 1); 
-		dup2(fd_W, 2);
-		
-		
-   		if (strcmp(tokens[0], "cd") == 0){
-        	ChangeDirectory();
-        	getcwd(path, sizeof(path));
-        	if (write(path_W, path, sizeof(path)) == -1){
-	        	perror("Problema la scriere in FIFO tata! 1");
-			}
-			close(path_W);
-    	}
-    	else{
-    		getcwd(path, sizeof(path));
-    		if (write(path_W, path, sizeof(path)) == -1){
-	        	perror("Problema la scriere in FIFO tata! 2");
-			}
-			close(path_W);
-		}
+	}
+	close(sockPath_F[1]);
+    path_W = sockPath_F[0];
 
+	if (strcmp(tokens[0], "cd") == 0){
+        ChangeDirectory();
+        getcwd(path, sizeof(path));
+        if (write(path_W, path, sizeof(path)) == -1){
+	       	perror("Problema la scriere in FIFO tata! 1");
+		}
+		close(path_W);
+		return;
+	}
+	else{
+		getcwd(path, sizeof(path));
+		if (write(path_W, path, sizeof(path)) == -1){
+        	perror("Problema la scriere in FIFO tata! 2");
+		}
+		close(path_W);
+	}
 
+	 //cream pipeul de comunicare intre Son1 si Son
+    if (pipe (pfd) == -1){
+      fprintf (stderr, "pipe\n");
+      exit (1);
+    }
+
+    if (-1 == (pid_nepot = fork())){
+        perror("Eroare la fork");
+        return;
+    }
+
+    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
+		
+		dup2(pfd[1], 1); 
+		dup2(pfd[1], 2);
+		close (pfd[0]);
+     
 		if (strcmp(argv[0], "myfind") == 0){
     		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
-    		execl("/home/timi/Documents/Retele/Tema1_Week5/stat.bin", "stat.bin", argv[1], NULL);
     		return;
 		}
 
@@ -218,21 +226,37 @@ void Son(){
 			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
 				logged = 1;
 			}
-			if (write(fd_W, &logged, sizeof(logged)) == -1){
+			if (write(pfd[1], &logged, sizeof(logged)) == -1){
 	        	perror("Problema la scriere in FIFO tata! 3");
 			}
-			close(fd_W);
+			close (pfd[1]);
   		}
 
 		execvp(argv[0], argv);
-		close(fd_W);
+		close(pfd[1]);
     }   
     else{ //FIU
-    
-        if (wait (&status) < 0){
+    	
+		if (wait (&status) < 0){
             perror ("wait()");
     	}
-    }
+
+    	close(pfd[1]);
+    	//read(pfd[0], pipeRead, DMAX);
+
+    	char ch;
+    	int index;
+    	while( read(pfd[0], &ch, 1) != 0){
+      		if(index < DMAX){
+        		pipeRead[index++] = ch;
+      		}
+    	}
+    	//pipeRead[(index == DMAX) ? DMAX-1 : index ] = '\0';
+
+    	close(pfd[0]);
+    	write(fd_W, pipeRead, sizeof(pipeRead));
+		close(fd_W);
+	}
     exit(1);
 }
 
@@ -401,8 +425,8 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		LoginProtocol();		
-		//Execute();
+		//LoginProtocol();		
+		Execute();
 
 	}
 	return 0;
