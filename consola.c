@@ -14,11 +14,12 @@
 #define FIFO_RECEIVE "/home/timi/Documents/Retele/Tema1_Week5/FIFO_R"
 
 char x;
-int isLogin = 0, logged = 0, tokensDim, isCd = 0, firstCd = 0;
+int isLogin = 0, logged = 0, tokensDim;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], received[DMAX];
 char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
 int sockp[2], sockPath[2], pipe_T[2], pipe_F[2];
+int sz;
 enum Channel{Pipes, Fifos, Sockets} channel;
 
 
@@ -132,22 +133,21 @@ void Son(){
 			break;
 	}
 
-
-	if (read(path_R, path, DMAX) == -1){
+	int length;
+	read(path_R, &sz, sizeof(int));
+	if ((length = read(path_R, path, sz)) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
-	if (read(fd_R, instruction, DMAX) == -1){
+
+	read(fd_R, &sz, sizeof(int));
+	if ((length = read(fd_R, instruction, sz)) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
 	
 	chdir(path);
 	Get_StrTok(instruction);
 
-	if (strcmp(tokens[0], "quit") == 0){
-        kill(getppid(), SIGINT);
-        exit(1);
-  	}
-
+	
   	//scriu date catre tata
     path_W = sockPath[1];
     switch(channel){
@@ -167,7 +167,10 @@ void Son(){
 	if (strcmp(tokens[0], "cd") == 0){
 		ChangeDirectory();
 		getcwd(path, sizeof(path));
-		if (write(path_W, path, sizeof(path)) == -1){
+
+		sz = strlen(path);
+		write(path_W, &sz, sizeof(sz));
+		if (write(path_W, path, sz) == -1){
 			perror("Problema la scriere in FIFO tata! 1");
 		}
 		close(path_W);
@@ -175,7 +178,10 @@ void Son(){
 	}
 	else{	
 		getcwd(path, sizeof(path));
-		if (write(path_W, path, sizeof(path)) == -1){
+
+		sz = strlen(path);
+		write(path_W, &sz, sizeof(sz));
+		if (write(path_W, path, sz) == -1){
 	    	perror("Problema la scriere in FIFO tata! 2");
 		}
 		close(path_W);
@@ -186,6 +192,9 @@ void Son(){
         argv[i] = tokens[i];
     argv[argc] = NULL;
 
+
+    
+    
     if (-1 == (pid_nepot = fork())){
         perror("Eroare la fork");
         return;
@@ -222,10 +231,15 @@ void Son(){
 		close(fd_W);
     }   
     else{ //FIU
-    
+    	
         if (wait (&status) < 0){
             perror ("wait()");
     	}
+
+    	if (strcmp(tokens[0], "quit") == 0){
+        kill(getppid(), SIGINT);
+        exit(1);
+  	}
     }
  	exit(1);
 }
@@ -253,10 +267,15 @@ void Parent(){
 			break;
 	}
 
-	if (write(path_W, path, sizeof(path)) == -1){
+	sz = strlen(path);
+	write(path_W, &sz, sizeof(sz));
+	if (write(path_W, path, sz) == -1){
 	        perror("Problema la scriere in FIFO tata! 5");
 	}
-	if (write(fd_W, instruction, sizeof(instruction)) == -1){
+
+	sz = strlen(instruction);
+	write(fd_W, &sz, sizeof(sz));
+	if (write(fd_W, instruction, sz) == -1){
 	        perror("Problema la scriere in FIFO tata! 4 ");
 	}
 
@@ -280,8 +299,9 @@ void Parent(){
 	}
 
 	//primesc pathul
-	if (read(path_R, &path, DMAX) == -1){
-       	perror("Eroare la citirea din FIFO!");
+	read(path_R, &sz, sizeof(int));
+	if (read(path_R, path, sz) == -1){
+       	perror("Eroare la citirea din FIFO10!");
    	}
    	//printf("%s\n", path);
    	close(path_R);
@@ -289,7 +309,7 @@ void Parent(){
     if (isLogin == 1){
 
     	if ((length = read(fd_R, &logged, sizeof(int))) == -1){
-        	perror("Eroare la citirea din FIFO!");
+        	perror("Eroare la citirea din FIFO11!");
     	}
     	
  		if (logged){
@@ -301,10 +321,13 @@ void Parent(){
  		}
     }
     else{
-    
+    	
+
+    	//read(fd_R, &sz, sizeof(int));
     	if ((length = read(fd_R, received, DMAX)) == -1){
-        	perror("Eroare la citirea din FIFO!");
+        	perror("Eroare la citirea din FIFO12!");
     	}
+
     	received[length] = '\0';
  		printf("%s", received);
  	}
@@ -323,7 +346,6 @@ void Execute(){
 
     int fd_W, fd_R;
     pid_t pid_fiu;
-
 
 
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath) < 0 ) {		
@@ -397,8 +419,8 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		LoginProtocol();		
-		//Execute();
+		//LoginProtocol();		
+		Execute();
 
 	}
 	return 0;
