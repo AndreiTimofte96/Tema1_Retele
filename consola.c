@@ -18,7 +18,7 @@ int isLogin = 0, logged = 0, tokensDim, isCd = 0, firstCd = 0;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], received[DMAX];
 char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
-int sockp[2], sockPath[2];
+int sockp[2], sockPath[2], pipe_T[2], pipe_F[2];
 enum Channel{Pipes, Fifos, Sockets} channel;
 
 
@@ -112,13 +112,13 @@ void Son(){
     pid_t pid_nepot;
     char *argv[DMAX];
     int argc, status;
-    char sonPath[DMAX];
 
 	//primesc date de la tata
 	close(sockPath[0]);
 	path_R = sockPath[1];
 	switch(channel){
 		case Pipes:
+			fd_R= pipe_T[0];
 			break;
 		case Fifos:
 			mknod(FIFO_SEND, S_IFIFO | 0666, 0); // 0666 este read - write
@@ -132,21 +132,54 @@ void Son(){
 			break;
 	}
 
+
+	if (read(path_R, path, DMAX) == -1){
+    	perror("Eroare la citirea din FIFO fiu!");
+	}
 	if (read(fd_R, instruction, DMAX) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
-	if (read(path_R, sonPath, DMAX) == -1){
-    	perror("Eroare la citirea din FIFO fiu!");
-	}
-
-	strcpy(path, sonPath);
+	
 	chdir(path);
-
 	Get_StrTok(instruction);
+
 	if (strcmp(tokens[0], "quit") == 0){
         kill(getppid(), SIGINT);
         exit(1);
   	}
+
+  	//scriu date catre tata
+    path_W = sockPath[1];
+    switch(channel){
+  		case Pipes:
+  			fd_W = pipe_F[1];
+  			break;
+  		case Fifos:	
+			fd_W = open(FIFO_RECEIVE, O_WRONLY);
+			break;
+		case Sockets:
+			fd_W = sockp[1];
+			break;
+		default:
+			break;
+	}
+
+	if (strcmp(tokens[0], "cd") == 0){
+		ChangeDirectory();
+		getcwd(path, sizeof(path));
+		if (write(path_W, path, sizeof(path)) == -1){
+			perror("Problema la scriere in FIFO tata! 1");
+		}
+		close(path_W);
+		return;
+	}
+	else{	
+		getcwd(path, sizeof(path));
+		if (write(path_W, path, sizeof(path)) == -1){
+	    	perror("Problema la scriere in FIFO tata! 2");
+		}
+		close(path_W);
+	}
 
     argc = tokensDim;   
     for (int i = 0; i < tokensDim; i++)
@@ -159,38 +192,8 @@ void Son(){
     }
     if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
 		
-    	//scriu date catre tata
-    	path_W = sockPath[1];
-    	switch(channel){
-  			case Pipes:
-  				break;
-  			case Fifos:	
-  				fd_W = open(FIFO_RECEIVE, O_WRONLY);
-    			break;
-    		case Sockets:
-    			fd_W = sockp[1];
-    			break;
-    		default:
-    			break;
-		}
-
 		dup2(fd_W, 1); 
 		dup2(fd_W, 2);		
-   		if (strcmp(tokens[0], "cd") == 0){
-        	ChangeDirectory();
-        	getcwd(path, sizeof(path));
-        	if (write(path_W, path, sizeof(path)) == -1){
-	        	perror("Problema la scriere in FIFO tata! 1");
-			}
-			close(path_W);
-    	}
-    	else{
-    		getcwd(path, sizeof(path));
-    		if (write(path_W, path, sizeof(path)) == -1){
-	        	perror("Problema la scriere in FIFO tata! 2");
-			}
-			close(path_W);
-		}
 
 		if (strcmp(argv[0], "myfind") == 0){
     		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
@@ -224,7 +227,7 @@ void Son(){
             perror ("wait()");
     	}
     }
-    exit(1);
+ 	exit(1);
 }
 
 void Parent(){
@@ -237,6 +240,7 @@ void Parent(){
 	path_W = sockPath[0];
 	switch(channel){
   		case Pipes:
+  			fd_W= pipe_T[1];
 			break;
 		case Fifos:	
 			fd_W = open(FIFO_SEND, O_WRONLY);
@@ -249,11 +253,11 @@ void Parent(){
 			break;
 	}
 
-	if (write(fd_W, instruction, sizeof(instruction)) == -1){
-	        perror("Problema la scriere in FIFO tata! 4 ");
-	}
 	if (write(path_W, path, sizeof(path)) == -1){
 	        perror("Problema la scriere in FIFO tata! 5");
+	}
+	if (write(fd_W, instruction, sizeof(instruction)) == -1){
+	        perror("Problema la scriere in FIFO tata! 4 ");
 	}
 
 	//receive
@@ -262,9 +266,10 @@ void Parent(){
 	path_R = sockPath[0];
     switch(channel){
   		case Pipes:
-				break;
-			case Fifos:	
-				mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
+  			fd_R= pipe_F[0];
+			break;
+		case Fifos:	
+			mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
     		fd_R= open(FIFO_RECEIVE, O_RDONLY);
 			break;
 		case Sockets:
@@ -319,15 +324,33 @@ void Execute(){
     int fd_W, fd_R;
     pid_t pid_fiu;
 
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp) < 0 ) {		
-        perror("Err... socketpair"); 
-        exit(1); 
-    }
+
+
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath) < 0 ) {		
-        perror("Err... socketpair"); 
-        exit(1); 
+	        perror("Err... socketpair"); 
+	        exit(1); 
+	}
+
+    if(channel == Sockets){
+
+	    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp) < 0 ) {		
+	        perror("Err... socketpair"); 
+	        exit(1); 
+	    }   
     }
-    
+
+    if(channel == Pipes){
+		/* creare pipe intern */
+		  if (-1 == pipe(pipe_T) ){
+		    perror("Eroare la crearea canalului intern!");
+		    exit(1);
+		  }
+
+		  if (-1 == pipe(pipe_F) ){
+		    perror("Eroare la crearea canalului intern!");
+		    exit(1);
+		  }
+    }
 
     if(-1 == (pid_fiu=fork())){
     	perror("Eroare la fork");
