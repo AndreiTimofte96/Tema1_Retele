@@ -14,12 +14,12 @@
 #define FIFO_RECEIVE "/home/timi/Documents/Retele/Tema1_Week5/FIFO_R"
 
 char x;
-int isLogin = 0, logged = 0, tokensDim;
+int isLogin = 0, logged = 0, tokensDim, sz;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], received[DMAX];
 char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
-int sockp[2], sockPath[2], pipe_T[2], pipe_F[2];
-int sz;
+int sockp[2], sockPath[2], pipe_T[2], pipe_F[2], pipeSon[2];
+
 enum Channel{Pipes, Fifos, Sockets} channel;
 
 
@@ -138,7 +138,6 @@ void Son(){
 	if ((length = read(path_R, path, sz)) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
-
 	read(fd_R, &sz, sizeof(int));
 	if ((length = read(fd_R, instruction, sz)) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
@@ -147,14 +146,20 @@ void Son(){
 	chdir(path);
 	Get_StrTok(instruction);
 
-	
+	if (strcmp(tokens[0], "quit") == 0){
+        kill(getppid(), SIGINT);
+        exit(0);
+  	}
+
   	//scriu date catre tata
     path_W = sockPath[1];
     switch(channel){
   		case Pipes:
+  			close(fd_R);
   			fd_W = pipe_F[1];
   			break;
   		case Fifos:	
+  			close(fd_R);
 			fd_W = open(FIFO_RECEIVE, O_WRONLY);
 			break;
 		case Sockets:
@@ -193,16 +198,33 @@ void Son(){
     argv[argc] = NULL;
 
 
-    
-    
+    if (-1 == pipe(pipeSon) ){
+		perror("Eroare la crearea canalului intern!");
+		exit(1);	
+	}
+
     if (-1 == (pid_nepot = fork())){
         perror("Eroare la fork");
         return;
     }
     if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
 		
-		dup2(fd_W, 1); 
-		dup2(fd_W, 2);		
+
+		if (strcmp(tokens[0], "login") == 0){
+			ReadCredentials();
+			logged = 0;
+			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
+				logged = 1;
+			}
+			if (write(pipeSon[1], &logged, sizeof(logged)) == -1){
+	        	perror("Problema la scriere in FIFO tata! 3");
+			}
+  		}
+
+		dup2(pipeSon[1], 1); 
+		dup2(pipeSon[1], 2);
+		close(pipeSon[0]);
+		close(pipeSon[1]);
 
 		if (strcmp(argv[0], "myfind") == 0){
     		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
@@ -215,20 +237,7 @@ void Son(){
     		return;
 		}
 
-		if (strcmp(tokens[0], "login") == 0){
-			ReadCredentials();
-			logged = 0;
-			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
-				logged = 1;
-			}
-			if (write(fd_W, &logged, sizeof(logged)) == -1){
-	        	perror("Problema la scriere in FIFO tata! 3");
-			}
-			close(fd_W);
-  		}
-
 		execvp(argv[0], argv);
-		close(fd_W);
     }   
     else{ //FIU
     	
@@ -236,10 +245,17 @@ void Son(){
             perror ("wait()");
     	}
 
-    	if (strcmp(tokens[0], "quit") == 0){
-        kill(getppid(), SIGINT);
-        exit(1);
-  	}
+    	char readPipe[DMAX];
+    	close(pipeSon[1]);
+    	read(pipeSon[0], r, DMAX);
+    	close(pipeSon[0]);
+
+    	sz = strlen(readPipe);
+		write(fd_W, &sz, sizeof(sz));
+		if (write(fd_W, readPipe, sz) == -1){
+	    	perror("Problema la scriere in FIFO tata! 2");
+		}
+		close(fd_W);
     }
  	exit(1);
 }
@@ -285,9 +301,11 @@ void Parent(){
 	path_R = sockPath[0];
     switch(channel){
   		case Pipes:
+  			close(fd_W);
   			fd_R= pipe_F[0];
 			break;
 		case Fifos:	
+  			close(fd_W);
 			mknod(FIFO_RECEIVE, S_IFIFO | 0666, 0); // 0666 este read - write
     		fd_R= open(FIFO_RECEIVE, O_RDONLY);
 			break;
@@ -308,6 +326,8 @@ void Parent(){
 
     if (isLogin == 1){
 
+
+    	//read(fd_R, &sz, sizeof(int));
     	if ((length = read(fd_R, &logged, sizeof(int))) == -1){
         	perror("Eroare la citirea din FIFO11!");
     	}
@@ -323,7 +343,7 @@ void Parent(){
     else{
     	
 
-    	//read(fd_R, &sz, sizeof(int));
+    	read(fd_R, &sz, sizeof(int));
     	if ((length = read(fd_R, received, DMAX)) == -1){
         	perror("Eroare la citirea din FIFO12!");
     	}
@@ -419,8 +439,8 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		//LoginProtocol();		
-		Execute();
+		LoginProtocol();		
+		//Execute();
 
 	}
 	return 0;
