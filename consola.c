@@ -18,8 +18,7 @@ int isLogin = 0, logged = 0, tokensDim, isCd = 0, firstCd = 0;
 char username[LEN], password[LEN], realUsername[LEN], realPassword[LEN];
 char instruction[DMAX], received[DMAX];
 char tokens[DMAX][DMAX], path[DMAX] = "/home/timi", absPath[DMAX];
-int sockp_T[2], sockp_F[2], sockPath_T[2], sockPath_F[2];
-
+int sockp[2], sockPath[2];
 enum Channel{Pipes, Fifos, Sockets} channel;
 
 
@@ -113,13 +112,11 @@ void Son(){
     pid_t pid_nepot;
     char *argv[DMAX];
     int argc, status;
-    char sonPath[DMAX], pipeRead[DMAX];
-    int pfd[2]; 	
+    char sonPath[DMAX];
 
 	//primesc date de la tata
-	close(sockPath_T[0]);
-	path_R = sockPath_T[1];
-
+	close(sockPath[0]);
+	path_R = sockPath[1];
 	switch(channel){
 		case Pipes:
 			break;
@@ -128,8 +125,8 @@ void Son(){
 			fd_R = open(FIFO_SEND, O_RDONLY);
 			break;
 		case Sockets:
-			close(sockp_T[0]);
-			fd_R = sockp_T[1];
+			close(sockp[0]);
+			fd_R = sockp[1];
 			break;
 		default:
 			break;
@@ -138,16 +135,13 @@ void Son(){
 	if (read(fd_R, instruction, DMAX) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
-
 	if (read(path_R, sonPath, DMAX) == -1){
     	perror("Eroare la citirea din FIFO fiu!");
 	}
 
 	strcpy(path, sonPath);
 	chdir(path);
-	close(fd_R);
-	close(path_R);
-	
+
 	Get_StrTok(instruction);
 	if (strcmp(tokens[0], "quit") == 0){
         kill(getppid(), SIGINT);
@@ -159,59 +153,48 @@ void Son(){
         argv[i] = tokens[i];
     argv[argc] = NULL;
 
-    //Trimit date catre tata
-    switch(channel){
+    if (-1 == (pid_nepot = fork())){
+        perror("Eroare la fork");
+        return;
+    }
+    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
+		
+    	//scriu date catre tata
+    	path_W = sockPath[1];
+    	switch(channel){
   			case Pipes:
   				break;
   			case Fifos:	
   				fd_W = open(FIFO_RECEIVE, O_WRONLY);
     			break;
     		case Sockets:
-    			close(sockp_F[1]);
-    			fd_W = sockp_F[0];
+    			fd_W = sockp[1];
     			break;
     		default:
     			break;
-	}
-	close(sockPath_F[1]);
-    path_W = sockPath_F[0];
-
-	if (strcmp(tokens[0], "cd") == 0){
-        ChangeDirectory();
-        getcwd(path, sizeof(path));
-        if (write(path_W, path, sizeof(path)) == -1){
-	       	perror("Problema la scriere in FIFO tata! 1");
 		}
-		close(path_W);
-		return;
-	}
-	else{
-		getcwd(path, sizeof(path));
-		if (write(path_W, path, sizeof(path)) == -1){
-        	perror("Problema la scriere in FIFO tata! 2");
+
+		dup2(fd_W, 1); 
+		dup2(fd_W, 2);		
+   		if (strcmp(tokens[0], "cd") == 0){
+        	ChangeDirectory();
+        	getcwd(path, sizeof(path));
+        	if (write(path_W, path, sizeof(path)) == -1){
+	        	perror("Problema la scriere in FIFO tata! 1");
+			}
+			close(path_W);
+    	}
+    	else{
+    		getcwd(path, sizeof(path));
+    		if (write(path_W, path, sizeof(path)) == -1){
+	        	perror("Problema la scriere in FIFO tata! 2");
+			}
+			close(path_W);
 		}
-		close(path_W);
-	}
 
-	 //cream pipeul de comunicare intre Son1 si Son
-    if (pipe (pfd) == -1){
-      fprintf (stderr, "pipe\n");
-      exit (1);
-    }
-
-    if (-1 == (pid_nepot = fork())){
-        perror("Eroare la fork");
-        return;
-    }
-
-    if (pid_nepot == 0){ //NEPOT -> redirectez datele catre canal
-		
-		dup2(pfd[1], 1); 
-		dup2(pfd[1], 2);
-		close (pfd[0]);
-     
 		if (strcmp(argv[0], "myfind") == 0){
     		execl("/home/timi/Documents/Retele/Tema1_Week5/find.bin", "find.bin", argv[1], NULL);
+    		execl("/home/timi/Documents/Retele/Tema1_Week5/stat.bin", "stat.bin", argv[1], NULL);
     		return;
 		}
 
@@ -226,37 +209,21 @@ void Son(){
 			if (strcmp(tokens[1], realUsername) == 0 && strcmp(tokens[2], realPassword) == 0){
 				logged = 1;
 			}
-			if (write(pfd[1], &logged, sizeof(logged)) == -1){
+			if (write(fd_W, &logged, sizeof(logged)) == -1){
 	        	perror("Problema la scriere in FIFO tata! 3");
 			}
-			close (pfd[1]);
+			close(fd_W);
   		}
 
 		execvp(argv[0], argv);
-		close(pfd[1]);
+		close(fd_W);
     }   
     else{ //FIU
-    	
-		if (wait (&status) < 0){
+    
+        if (wait (&status) < 0){
             perror ("wait()");
     	}
-
-    	close(pfd[1]);
-    	//read(pfd[0], pipeRead, DMAX);
-
-    	char ch;
-    	int index;
-    	while( read(pfd[0], &ch, 1) != 0){
-      		if(index < DMAX){
-        		pipeRead[index++] = ch;
-      		}
-    	}
-    	//pipeRead[(index == DMAX) ? DMAX-1 : index ] = '\0';
-
-    	close(pfd[0]);
-    	write(fd_W, pipeRead, sizeof(pipeRead));
-		close(fd_W);
-	}
+    }
     exit(1);
 }
 
@@ -266,19 +233,17 @@ void Parent(){
 	int stat, cod_term, length;
 
 	//trimite data catre fiu
-
-	close(sockPath_T[1]);
-	path_W = sockPath_T[0];
-
+	close(sockPath[1]);
+	path_W = sockPath[0];
 	switch(channel){
   		case Pipes:
-				break;
-			case Fifos:	
-				fd_W = open(FIFO_SEND, O_WRONLY);
+			break;
+		case Fifos:	
+			fd_W = open(FIFO_SEND, O_WRONLY);
 			break;
 		case Sockets:
-			close(sockp_T[1]);
-			fd_W = sockp_T[0];
+			close(sockp[1]);
+			fd_W = sockp[0];
 			break;
 		default:
 			break;
@@ -287,19 +252,14 @@ void Parent(){
 	if (write(fd_W, instruction, sizeof(instruction)) == -1){
 	        perror("Problema la scriere in FIFO tata! 4 ");
 	}
-
 	if (write(path_W, path, sizeof(path)) == -1){
 	        perror("Problema la scriere in FIFO tata! 5");
 	}
-	
-	close(path_W);
-	close(fd_W);
 
 	//receive
     //citeste date de la fiu
-	close(sockPath_F[0]);
-	path_R = sockPath_F[1];
-
+	//close(sockPath_F[0]);
+	path_R = sockPath[0];
     switch(channel){
   		case Pipes:
 				break;
@@ -308,8 +268,7 @@ void Parent(){
     		fd_R= open(FIFO_RECEIVE, O_RDONLY);
 			break;
 		case Sockets:
-			close(sockp_F[0]);
-			fd_R = sockp_F[1];
+			fd_R = sockp[0];
 			break;
 		default:
 			break;
@@ -344,7 +303,6 @@ void Parent(){
     	received[length] = '\0';
  		printf("%s", received);
  	}
-
 	close(fd_R);
 
 	stat = wait(&cod_term);
@@ -356,29 +314,20 @@ void Parent(){
     }
 }
 
-
 void Execute(){
 
     int fd_W, fd_R;
     pid_t pid_fiu;
 
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_T) < 0 ) {		
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp) < 0 ) {		
         perror("Err... socketpair"); 
         exit(1); 
     }
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockp_F) < 0 ) {		
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath) < 0 ) {		
         perror("Err... socketpair"); 
         exit(1); 
     }
-
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath_T) < 0 ) {		
-        perror("Err... socketpair"); 
-        exit(1); 
-    }
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockPath_F) < 0 ) {		
-        perror("Err... socketpair"); 
-        exit(1); 
-    }
+    
 
     if(-1 == (pid_fiu=fork())){
     	perror("Eroare la fork");
@@ -425,8 +374,8 @@ int main(int argc, char *argv[]){
 	while(1){
 		Print_NameLine(); 
 		GetInstruction();
-		//LoginProtocol();		
-		Execute();
+		LoginProtocol();		
+		//Execute();
 
 	}
 	return 0;
