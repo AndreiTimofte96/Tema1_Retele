@@ -148,6 +148,7 @@ void Son(){
 
 	if (strcmp(tokens[0], "quit") == 0){
         kill(getppid(), SIGINT);
+        //exit(EXIT_SUCCESS);
         exit(0);
   	}
 
@@ -247,7 +248,7 @@ void Son(){
 
     	char readPipe[DMAX];
     	close(pipeSon[1]);
-    	read(pipeSon[0], r, DMAX);
+    	read(pipeSon[0], readPipe, DMAX);
     	close(pipeSon[0]);
 
     	sz = strlen(readPipe);
@@ -448,9 +449,9 @@ int main(int argc, char *argv[]){
 /*
 de facut in continuare: 
 1) stergerea fisierelor fifo - optional - marti
-2) prefixare comenzi dimensiunea lor - marti
+2) prefixare comenzi dimensiunea lor - marti - DONE
 3) cd - duminica - DONE
-4) adaugare pipeuri - marti
+4) adaugare pipeuri - marti - DONE
 5) my_stat - duminica - DONE 
 6) my_stat de adaugat la find. - duminica - DONE
 */
